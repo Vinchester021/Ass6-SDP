@@ -19,10 +19,14 @@ public class Main {
         ComplianceVisitor complianceVisitor =
                 new ComplianceVisitor();
 
+        TechnicalDebtVisitor technicalDebtVisitor =
+                new TechnicalDebtVisitor();
+
         project.accept(securityVisitor);
         project.accept(statisticsVisitor);
         project.accept(qualityGateVisitor);
         project.accept(complianceVisitor);
+        project.accept(technicalDebtVisitor);
 
         System.out.println(
                 "=== SMART CODE INSPECTION & COMPLIANCE ENGINE ==="
@@ -39,5 +43,8 @@ public class Main {
 
         System.out.println();
         System.out.println(complianceVisitor.getReport());
+
+        System.out.println();
+        System.out.println(technicalDebtVisitor.getReport());
     }
 }
