@@ -15,12 +15,27 @@ public class QualityGateVisitor implements ProjectVisitor {
     private int sourceFiles;
     private int testFiles;
     private int failingTestFiles;
+    private int criticalSecurityIssues;
     private double totalComplexity;
 
     @Override
     public void visit(SourceCodeFile file) {
         sourceFiles++;
         totalComplexity += file.complexity();
+
+        if (file.hardcodedCredentials()) {
+            criticalSecurityIssues++;
+            violations.add(
+                    file.fileName() + ": hardcoded credentials detected"
+            );
+        }
+
+        if (file.highRisk()) {
+            criticalSecurityIssues++;
+            violations.add(
+                    file.fileName() + ": high-risk source file"
+            );
+        }
 
         if (file.todoCount() > 0) {
             violations.add(
@@ -50,12 +65,37 @@ public class QualityGateVisitor implements ProjectVisitor {
 
     @Override
     public void visit(ConfigurationFile file) {
-        // Configuration files are checked by ComplianceVisitor.
+        if (file.containsSecrets()) {
+            criticalSecurityIssues++;
+            violations.add(
+                    file.fileName() + ": exposed secret detected"
+            );
+        }
+
+        if (!file.secureSettings()) {
+            violations.add(
+                    file.fileName() + ": insecure configuration"
+            );
+        }
     }
 
     @Override
     public void visit(DependencyFile file) {
-        // Dependencies are checked by ComplianceVisitor.
+        for (Dependency dependency : file.dependencies()) {
+            if (dependency.vulnerable()) {
+                criticalSecurityIssues++;
+                violations.add(
+                        dependency.name() + ": vulnerable dependency"
+                );
+            }
+
+            if (dependency.prohibited()) {
+                criticalSecurityIssues++;
+                violations.add(
+                        dependency.name() + ": prohibited dependency"
+                );
+            }
+        }
     }
 
     @Override
@@ -79,29 +119,49 @@ public class QualityGateVisitor implements ProjectVisitor {
         return (double) testFiles / sourceFiles;
     }
 
+    public int getCriticalSecurityIssues() {
+        return criticalSecurityIssues;
+    }
+
+    public boolean isSecurityPassed() {
+        return criticalSecurityIssues == 0;
+    }
+
+    public boolean isComplexityPassed() {
+        return getAverageComplexity()
+                <= MAX_AVERAGE_COMPLEXITY;
+    }
+
+    public boolean isTestsPassed() {
+        return failingTestFiles == 0
+                && getTestToSourceRatio()
+                >= MIN_TEST_TO_SOURCE_RATIO;
+    }
+
     public boolean isPassed() {
-        return violations.isEmpty()
-                && failingTestFiles == 0
-                && getAverageComplexity() <= MAX_AVERAGE_COMPLEXITY
-                && getTestToSourceRatio() >= MIN_TEST_TO_SOURCE_RATIO;
+        return isSecurityPassed()
+                && isComplexityPassed()
+                && isTestsPassed()
+                && violations.isEmpty();
     }
 
     public List<String> getViolations() {
         List<String> result = new ArrayList<>(violations);
 
-        if (getAverageComplexity() > MAX_AVERAGE_COMPLEXITY) {
+        if (!isComplexityPassed()) {
             result.add(String.format(
                     Locale.US,
-                    "Average complexity %.2f exceeds the allowed value %.2f",
+                    "Average complexity %.2f exceeds %.2f",
                     getAverageComplexity(),
                     MAX_AVERAGE_COMPLEXITY
             ));
         }
 
-        if (getTestToSourceRatio() < MIN_TEST_TO_SOURCE_RATIO) {
+        if (getTestToSourceRatio()
+                < MIN_TEST_TO_SOURCE_RATIO) {
             result.add(String.format(
                     Locale.US,
-                    "Test/source ratio %.2f is below the required value %.2f",
+                    "Test/source ratio %.2f is below %.2f",
                     getTestToSourceRatio(),
                     MIN_TEST_TO_SOURCE_RATIO
             ));
@@ -116,23 +176,29 @@ public class QualityGateVisitor implements ProjectVisitor {
         report.append("=== QUALITY GATE ===")
                 .append(System.lineSeparator());
 
+        report.append("Security: ")
+                .append(isSecurityPassed() ? "PASS" : "FAIL")
+                .append(" (critical issues: ")
+                .append(criticalSecurityIssues)
+                .append(")")
+                .append(System.lineSeparator());
+
         report.append(String.format(
                 Locale.US,
-                "Average complexity: %.2f%n",
+                "Complexity: %s (average: %.2f)%n",
+                isComplexityPassed() ? "PASS" : "FAIL",
                 getAverageComplexity()
         ));
 
         report.append(String.format(
                 Locale.US,
-                "Test/source ratio: %.2f%n",
-                getTestToSourceRatio()
+                "Tests: %s (ratio: %.2f, failing files: %d)%n",
+                isTestsPassed() ? "PASS" : "FAIL",
+                getTestToSourceRatio(),
+                failingTestFiles
         ));
 
-        report.append("Failing test files: ")
-                .append(failingTestFiles)
-                .append(System.lineSeparator());
-
-        report.append("Status: ")
+        report.append("FINAL RESULT: ")
                 .append(isPassed() ? "PASSED" : "FAILED")
                 .append(System.lineSeparator());
 
@@ -157,6 +223,7 @@ public class QualityGateVisitor implements ProjectVisitor {
         sourceFiles = 0;
         testFiles = 0;
         failingTestFiles = 0;
+        criticalSecurityIssues = 0;
         totalComplexity = 0.0;
     }
 }
